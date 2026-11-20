@@ -1,0 +1,8 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'app.dart';
+
+void main() {
+  FlutterBluePlus.setLogLevel(LogLevel.info, color: true);
+  runApp(const RemoteApp());
+}
