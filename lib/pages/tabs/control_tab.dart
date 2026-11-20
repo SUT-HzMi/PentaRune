@@ -577,6 +577,11 @@ class _ScorePanel extends StatelessWidget {
                     '最新 ${ble.latestScore}',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
+                IconButton(
+                  tooltip: '清空成绩记录',
+                  onPressed: enabled ? ble.clearScores : null,
+                  icon: const Icon(Icons.delete_outline),
+                ),
               ],
             ),
             const SizedBox(height: 14),

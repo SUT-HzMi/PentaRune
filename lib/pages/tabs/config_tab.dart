@@ -73,6 +73,13 @@ class ConfigTab extends StatelessWidget {
         Opacity(
           opacity: enabled ? 1 : 0.45,
           child: RunePanel(
+            child: _BoardTools(ble: ble, enabled: enabled),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Opacity(
+          opacity: enabled ? 1 : 0.45,
+          child: RunePanel(
             child: _Maintenance(ble: ble, enabled: enabled),
           ),
         ),
@@ -83,6 +90,206 @@ class ConfigTab extends StatelessWidget {
       ],
     );
   }
+}
+
+class _BoardTools extends StatelessWidget {
+  const _BoardTools({required this.ble, required this.enabled});
+
+  final RuneBle ble;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    Widget indicator(String label, bool online) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.circle,
+          size: 11,
+          color: online ? scheme.tertiary : scheme.outline,
+        ),
+        const SizedBox(width: 6),
+        Text(label),
+      ],
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SectionTitle('板卡状态'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 16,
+          runSpacing: 8,
+          children: [
+            for (var i = 0; i < 5; i++)
+              indicator('装甲${i + 1}', ble.boardStatus & (1 << i) != 0),
+            indicator('电机板', ble.boardStatus & (1 << 5) != 0),
+          ],
+        ),
+        const SizedBox(height: 18),
+        const SectionTitle('装甲板调试'),
+        const SizedBox(height: 6),
+        for (var i = 0; i < 5; i++)
+          _BoardDebugRow(ble: ble, board: i, enabled: enabled),
+        const SizedBox(height: 8),
+        _MotorSpeedControl(ble: ble, enabled: enabled),
+      ],
+    );
+  }
+}
+
+class _BoardDebugRow extends StatelessWidget {
+  const _BoardDebugRow({
+    required this.ble,
+    required this.board,
+    required this.enabled,
+  });
+
+  final RuneBle ble;
+  final int board;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    Future<void> send(int command) async {
+      try {
+        await ble.sendBoardDebug(command, board);
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$e')));
+        }
+      }
+    }
+
+    Widget action(String label, int command) => Tooltip(
+      message: label,
+      child: OutlinedButton(
+        onPressed: enabled ? () => send(command) : null,
+        child: Text(label),
+        style: OutlinedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          minimumSize: const Size(0, 40),
+        ),
+      ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 6),
+          child: Text(
+            '装甲板 ${board + 1}',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+        ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = constraints.maxWidth < 480 ? 2 : 4;
+            final spacing = 8.0;
+            final width =
+                (constraints.maxWidth - spacing * (columns - 1)) / columns;
+            final actions = [
+              action('点亮靶心', 1),
+              action('整面点亮', 4),
+              action('按键测试', 5),
+              action('熄灭灯光', 2),
+            ];
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                for (final item in actions) SizedBox(width: width, child: item),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _MotorSpeedControl extends StatefulWidget {
+  const _MotorSpeedControl({required this.ble, required this.enabled});
+
+  final RuneBle ble;
+  final bool enabled;
+
+  @override
+  State<_MotorSpeedControl> createState() => _MotorSpeedControlState();
+}
+
+class _MotorSpeedControlState extends State<_MotorSpeedControl> {
+  final _rpm = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _rpm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    final value = double.tryParse(_rpm.text.trim());
+    if (value == null || !value.isFinite) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请输入有效的目标转速')));
+      return;
+    }
+    setState(() => _sending = true);
+    try {
+      await widget.ble.setMotorSpeed(value);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('目标转速已发送')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      const Expanded(child: Text('电机目标转速 (rpm)')),
+      SizedBox(
+        width: 120,
+        child: TextField(
+          controller: _rpm,
+          enabled: widget.enabled && !_sending,
+          keyboardType: const TextInputType.numberWithOptions(
+            decimal: true,
+            signed: true,
+          ),
+          decoration: const InputDecoration(hintText: '例如 10', isDense: true),
+        ),
+      ),
+      const SizedBox(width: 8),
+      IconButton.filled(
+        tooltip: '发送转速',
+        onPressed: widget.enabled && !_sending ? _send : null,
+        icon: _sending
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.send),
+      ),
+    ],
+  );
 }
 
 class LightTile extends StatefulWidget {

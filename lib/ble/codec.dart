@@ -89,6 +89,15 @@ abstract final class RuneCodec {
     return bytes.buffer.asUint8List();
   }
 
+  static Uint8List debugCommand(int command, int argument, {double value = 0}) {
+    if (!value.isFinite) throw const FormatException('调试参数必须是有限数字');
+    final bytes = ByteData(8)
+      ..setUint8(0, command & 0xff)
+      ..setUint8(1, argument & 0xff)
+      ..setFloat32(4, value, Endian.little);
+    return bytes.buffer.asUint8List();
+  }
+
   static PidData readPid(List<int> value) {
     if (value.length != 24) {
       throw const FormatException('PID 数据长度应为 24 字节');

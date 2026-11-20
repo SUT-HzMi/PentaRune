@@ -75,6 +75,8 @@ await client.write_gatt_char(
 | 成绩历史 | `0x2A69` | R | 10 B | 最近 10 条成绩的原始 `uint8` 值。代码未定义时间戳、颜色或模式元数据。 |
 | 电机解锁 | `0x2A3B` | WNR / N | 1 B | 写入触发 `unlock_task`；当前代码不检查具体字节值。 |
 | STOP | `0x2AC8` | WNR / N | 1 B | 写入触发 `stop_task`；Operator 写入 `0x00`。 |
+| 板卡状态 | `0x2AF0` | R | 1 B | 位图：bit 0–4 分别表示装甲板 1–5 在线，bit 5 表示电机板在线。 |
+| 调试命令 | `0x2AF1` | WNR | 8 B | `<BB2xf`：命令、板号、2 字节填充、小端 float 参数。命令 1 点亮、2 熄灭、3 设置电机转速（rad/s）、4 全亮、5 按键测试。 |
 | OTA 触发 | `0x2A9F` | WNR / N | 1 B | 写入触发 `ota_task`；当前代码不检查具体字节值。 |
 
 ### 4.1 RUN 写入负载（`0x2A65`）

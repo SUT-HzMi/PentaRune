@@ -30,6 +30,9 @@ class RuneBle extends ChangeNotifier {
         notifyListeners();
       }
     });
+    _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      unawaited(_pollBoardStatus());
+    });
   }
 
   LinkState link = LinkState.idle;
@@ -43,6 +46,7 @@ class RuneBle extends ChangeNotifier {
   int edgeLight = 0;
   int logoLight = 0;
   int matrixLight = 0;
+  int boardStatus = 0;
   PidData pid = const PidData.zero();
   int? latestScore;
   List<int> scores = const [];
@@ -58,9 +62,11 @@ class RuneBle extends ChangeNotifier {
   StreamSubscription<int>? _mtuSub;
   Timer? _retryTimer;
   Timer? _cmdTimer;
+  Timer? _statusTimer;
   final List<Timer> _demoTimers = [];
   bool _manualOff = false;
   bool _linked = false;
+  bool _pollingStatus = false;
   int _retryCount = 0;
 
   bool get ready => link == LinkState.ready;
@@ -150,6 +156,7 @@ class RuneBle extends ChangeNotifier {
     _device = null;
     link = LinkState.idle;
     runState = RunState.idle;
+    boardStatus = 0;
     notifyListeners();
   }
 
@@ -278,6 +285,67 @@ class RuneBle extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> sendBoardDebug(int command, int board) async {
+    if (board < 0 || board > 4) throw RangeError.range(board, 0, 4, 'board');
+    if (demo) {
+      _log(
+        '模拟调试命令：${_debugAction(command)} 装甲板 ${board + 1}',
+        RuneMsgType.text,
+      );
+      notifyListeners();
+      return;
+    }
+    await _need(
+      BleIds.debug,
+    ).write(RuneCodec.debugCommand(command, board), withoutResponse: true);
+    _log('调试命令已发送：${_debugAction(command)} 装甲板 ${board + 1}', RuneMsgType.text);
+    notifyListeners();
+  }
+
+  Future<void> setMotorSpeed(double rpm) async {
+    if (!rpm.isFinite) throw const FormatException('转速必须是有限数字');
+    final radiansPerSecond = rpm * 2 * 3.141592653589793 / 60;
+    if (demo) {
+      _log('模拟电机目标转速：${rpm.toStringAsFixed(2)} rpm', RuneMsgType.text);
+      notifyListeners();
+      return;
+    }
+    await _need(BleIds.debug).write(
+      RuneCodec.debugCommand(3, 0, value: radiansPerSecond),
+      withoutResponse: true,
+    );
+    _log('电机目标转速已发送：${rpm.toStringAsFixed(2)} rpm', RuneMsgType.text);
+    notifyListeners();
+  }
+
+  void clearScores() {
+    scores = const [];
+    latestScore = null;
+    notifyListeners();
+  }
+
+  String _debugAction(int command) => switch (command) {
+    1 => '点亮',
+    2 => '熄灭',
+    4 => '全亮',
+    5 => '按键测试',
+    _ => '命令 $command',
+  };
+
+  Future<void> _pollBoardStatus() async {
+    if (!ready || demo || _pollingStatus) return;
+    _pollingStatus = true;
+    try {
+      final value = await _read(BleIds.boardStatus);
+      if (value.isNotEmpty && value.first != boardStatus) {
+        boardStatus = value.first;
+        notifyListeners();
+      }
+    } finally {
+      _pollingStatus = false;
+    }
+  }
+
   Future<void> setDemo(bool value) async {
     if (demo == value) return;
     _cancelDemoTimers();
@@ -313,6 +381,7 @@ class RuneBle extends ChangeNotifier {
         outMax: 100,
       );
       scores = const [12, 10, 15, 8, 11, 13, 9, 14, 7, 12];
+      boardStatus = 0x3f;
       latestScore = null;
       logs.clear();
       _log('模拟设备已连接', RuneMsgType.text);
@@ -327,6 +396,7 @@ class RuneBle extends ChangeNotifier {
     rssi = null;
     mtu = 23;
     scores = const [];
+    boardStatus = 0;
     latestScore = null;
     logs.clear();
     notifyListeners();
@@ -414,6 +484,8 @@ class RuneBle extends ChangeNotifier {
       BleIds.matrixLight,
       BleIds.pid,
       BleIds.resetId,
+      BleIds.boardStatus,
+      BleIds.debug,
     ]) {
       _need(id);
     }
@@ -430,6 +502,7 @@ class RuneBle extends ChangeNotifier {
     edgeLight = _one(await _read(BleIds.edgeLight));
     logoLight = _one(await _read(BleIds.logoLight));
     matrixLight = _one(await _read(BleIds.matrixLight));
+    boardStatus = _one(await _read(BleIds.boardStatus));
     final pidBytes = await _read(BleIds.pid);
     if (pidBytes.length == 24) pid = RuneCodec.readPid(pidBytes);
   }
@@ -455,6 +528,7 @@ class RuneBle extends ChangeNotifier {
   void _onLink(BluetoothConnectionState state) {
     if (state != BluetoothConnectionState.disconnected || !_linked) return;
     _linked = false;
+    boardStatus = 0;
     unawaited(_clearSession());
     runState = RunState.unknown;
     if (_manualOff) {
@@ -571,6 +645,7 @@ class RuneBle extends ChangeNotifier {
     _manualOff = true;
     _retryTimer?.cancel();
     _cmdTimer?.cancel();
+    _statusTimer?.cancel();
     _cancelDemoTimers();
     unawaited(_scanSub?.cancel());
     unawaited(_scanStateSub?.cancel());

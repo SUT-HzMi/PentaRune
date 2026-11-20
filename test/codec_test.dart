@@ -35,6 +35,16 @@ void main() {
       expect(output.values, input.values);
     });
 
+    test('encodes debug commands with little-endian float payload', () {
+      final bytes = RuneCodec.debugCommand(3, 0, value: 1.5);
+      expect(bytes, hasLength(8));
+      expect(bytes[0], 3);
+      expect(bytes[1], 0);
+      expect(bytes[2], 0);
+      expect(bytes[3], 0);
+      expect(ByteData.sublistView(bytes).getFloat32(4, Endian.little), 1.5);
+    });
+
     test('parses score notifications and removes nul bytes', () {
       final msg = RuneCodec.notice([
         ...'[Score: 12]PowerRune Activated Successfully'.codeUnits,
